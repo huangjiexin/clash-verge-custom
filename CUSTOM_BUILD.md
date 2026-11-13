@@ -44,3 +44,7 @@ git rebase <reviewed-upstream-ref>
 
 Resolve the small integration hooks described in the feature guide, regenerate
 IPC contracts, and validate frontend and native builds before creating packages.
+
+The manual **Custom Windows package** GitHub Actions workflow builds an unsigned
+Windows x64 installer and retains it as a private workflow artifact for 30 days.
+It does not create a release, publish an updater manifest, or deploy the app.
