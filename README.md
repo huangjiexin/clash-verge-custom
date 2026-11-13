@@ -1,3 +1,5 @@
+> **Custom subscription-group edition.** This repository adds independent scripted subscription groups to Clash Verge Rev. See [the custom build guide](CUSTOM_BUILD.md) and [feature documentation](docs/features/subscription-groups.md). Upstream project information follows below.
+
 <h1 align="center">
   <img src="./src-tauri/icons/icon.png" alt="Clash" width="128" />
   <br>
