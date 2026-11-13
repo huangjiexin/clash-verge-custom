@@ -48,3 +48,14 @@ IPC contracts, and validate frontend and native builds before creating packages.
 The manual **Custom Windows package** GitHub Actions workflow builds an unsigned
 Windows x64 installer and retains it as a workflow artifact for 30 days.
 It does not create a release, publish an updater manifest, or deploy the app.
+
+### Cross-compiling Windows from macOS
+
+The 2026-11-13 package was also compiled with `cargo-xwin 0.23.1`, LLVM/LLD 21,
+and the Microsoft CRT/SDK. Use `cargo-xwin` as Tauri's runner with the Windows
+target. Prepare Windows resources in a separate source directory so they do not
+mix with macOS service binaries. Keep the downloaded SimpleSC plugin available to
+NSIS in addition to Tauri's own NSIS plugin. When invoking macOS `makensis`, set
+`LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8`; the host's unset locale caused NSIS to abort
+while processing `StrFunc.nsh`. The x64 application and embedded services still
+require Windows runtime validation; cross-compilation is not a Windows smoke test.
