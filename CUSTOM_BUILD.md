@@ -1,6 +1,6 @@
 # Custom subscription-group build
 
-This private customization is based on Clash Verge Rev v2.5.10, upstream commit
+This customization is based on Clash Verge Rev v2.5.10, upstream commit
 `c83f7ad`. Upstream Git history is retained so the extension can be rebased.
 
 The Subscriptions page includes independent subscription groups with selectable
@@ -46,5 +46,5 @@ Resolve the small integration hooks described in the feature guide, regenerate
 IPC contracts, and validate frontend and native builds before creating packages.
 
 The manual **Custom Windows package** GitHub Actions workflow builds an unsigned
-Windows x64 installer and retains it as a private workflow artifact for 30 days.
+Windows x64 installer and retains it as a workflow artifact for 30 days.
 It does not create a release, publish an updater manifest, or deploy the app.
