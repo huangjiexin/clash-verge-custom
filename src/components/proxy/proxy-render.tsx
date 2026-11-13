@@ -16,6 +16,7 @@ import {
 import { memo, useId, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { useProxyPresentation } from '@/features/subscription-groups/use-proxy-presentation'
 import { useIconCache } from '@/hooks/use-icon-cache'
 import { useVerge } from '@/hooks/use-verge'
 import { useThemeMode } from '@/services/states'
@@ -45,6 +46,7 @@ interface RenderProps {
 
 export const ProxyRender = memo(function ProxyRender(props: RenderProps) {
   const { t } = useTranslation()
+  const presentation = useProxyPresentation()
   const {
     item,
     stickyed = false,
@@ -120,7 +122,9 @@ export const ProxyRender = memo(function ProxyRender(props: RenderProps) {
         )}
         <ListItemText
           sx={{ flex: '0 1 auto', minWidth: 0 }}
-          primary={<StyledPrimary>{group.name}</StyledPrimary>}
+          primary={
+            <StyledPrimary>{presentation.summary(group.name)}</StyledPrimary>
+          }
           secondary={
             <Box
               sx={{
@@ -141,7 +145,7 @@ export const ProxyRender = memo(function ProxyRender(props: RenderProps) {
               >
                 <StyledTypeBox>{group.type}</StyledTypeBox>
                 <StyledSubtitle sx={{ color: 'text.secondary' }}>
-                  {group.now}
+                  {group.now && presentation.summary(group.now, group.name)}
                 </StyledSubtitle>
               </Box>
             </Box>

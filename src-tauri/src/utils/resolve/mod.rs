@@ -150,6 +150,7 @@ async fn init_startup_script() {
 }
 
 async fn init_timer() {
+    crate::extensions::subscription_groups::start();
     logging_error!(Type::Setup, Timer::global().init().await);
 }
 

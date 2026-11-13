@@ -37,6 +37,7 @@ import { useNavigate } from 'react-router'
 
 import { EnhancedCard } from '@/components/home/enhanced-card'
 import type { ProxySortType } from '@/components/proxy/use-filter-sort'
+import { useProxyPresentation } from '@/features/subscription-groups/use-proxy-presentation'
 import { useGroupDelays } from '@/hooks/use-group-delays'
 import { useProfiles } from '@/hooks/use-profiles'
 import { useProxySelection } from '@/hooks/use-proxy-selection'
@@ -436,6 +437,7 @@ const PersistentProxySelect = ({
   onChange,
   ...props
 }: PersistentProxySelectProps) => {
+  const presentation = useProxyPresentation()
   const fixedProxyInUsed = selectedName === fixed
 
   return (
@@ -449,7 +451,9 @@ const PersistentProxySelect = ({
             alignItems: 'center',
           }}
         >
-          <Typography noWrap>{selectedName}</Typography>
+          <Typography noWrap>
+            {presentation.summary(selectedName, groupName)}
+          </Typography>
           <Chip
             size="small"
             label={delayManager.formatDelay(selectedDelay)}
@@ -511,7 +515,7 @@ const PersistentProxySelect = ({
                 </span>
               )}
               <Typography noWrap sx={{ flex: 1, mr: 1 }}>
-                {option.name}
+                {presentation.summary(option.name, groupName)}
               </Typography>
               {!option.disabled && (
                 <Chip
@@ -538,6 +542,7 @@ export const CurrentProxyCard = () => {
   const navigate = useNavigate()
   const theme = useTheme()
   const { proxyView } = useProxiesData()
+  const presentation = useProxyPresentation()
   const { clashConfig } = useClashConfigData()
   const { refreshProxy } = useAppRefreshers()
   const { isCoreDataPending } = useCoreDataStatus()
@@ -1029,7 +1034,7 @@ export const CurrentProxyCard = () => {
           >
             <Box>
               <Typography variant="body1" sx={{ fontWeight: 'medium' }}>
-                {currentProxy?.name ??
+                {(currentProxy && presentation.summary(currentProxy.name)) ??
                   t('home.components.currentProxy.labels.noActiveNode')}
               </Typography>
 
@@ -1088,7 +1093,11 @@ export const CurrentProxyCard = () => {
           <Box sx={{ mb: 1.5 }}>
             <PersistentSelect
               label={t('home.components.currentProxy.labels.group')}
-              displayValue={<Typography noWrap>{selectedGroupName}</Typography>}
+              displayValue={
+                <Typography noWrap>
+                  {presentation.summary(selectedGroupName)}
+                </Typography>
+              }
               open={openSelect === 'group'}
               disabled={isGlobalMode || isDirectMode}
               keepOpenRef={delayButtonRef}
@@ -1102,7 +1111,9 @@ export const CurrentProxyCard = () => {
                     selected={group.name === selectedGroupName}
                     onClick={() => handleGroupChange(group.name)}
                   >
-                    <Typography noWrap>{group.name}</Typography>
+                    <Typography noWrap>
+                      {presentation.summary(group.name)}
+                    </Typography>
                   </MenuItem>
                 ))
               }

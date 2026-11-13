@@ -79,7 +79,11 @@ const debugProfileSwitch = (action: string, profile: string, extra?: any) => {
   debugLog(`[Profile-Debug][${timestamp}] ${action}: ${profile}`, extra || '')
 }
 
-const ProfilePage = () => {
+const ProfilePage = ({
+  titleOverride,
+}: {
+  titleOverride?: React.ReactNode
+} = {}) => {
   const { t } = useTranslation()
   const location = useLocation()
   const [url, setUrl] = useState('')
@@ -694,7 +698,7 @@ const ProfilePage = () => {
   return (
     <BasePage
       full
-      title={t('profiles.page.title')}
+      title={titleOverride ?? t('profiles.page.title')}
       contentStyle={{ height: '100%' }}
       header={
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>

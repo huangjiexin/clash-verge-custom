@@ -13,6 +13,7 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import { BaseLoading } from '@/components/base'
+import { useProxyPresentation } from '@/features/subscription-groups/use-proxy-presentation'
 import { useProxyDelayState } from '@/hooks/use-proxy-delay-state'
 import delayManager from '@/services/delay'
 import {
@@ -53,9 +54,13 @@ export const ProxyItem = (props: Props) => {
   const { group, member, selected, showType = true, sx, onClick } = props
   const details = memberDetails(member)
   const unresolved = member.kind === 'unresolved'
-  const name = member.ref.name
+  const presentation = useProxyPresentation()
+  const { name, source } = presentation.label(member.ref.name, group.name)
   const type = unresolved ? member.ref.reason : (details?.type ?? '')
-  const now = member.kind === 'group' ? member.group.now : undefined
+  const now =
+    member.kind === 'group' && member.group.now
+      ? presentation.summary(member.group.now, member.group.name)
+      : undefined
 
   // -1/<=0 为不显示，-2 为 loading
   const { delayValue, isPreset, timeout, onDelay } = useProxyDelayState(
@@ -98,7 +103,7 @@ export const ProxyItem = (props: Props) => {
         ]}
       >
         <ListItemText
-          title={name}
+          title={[name, source, now].filter(Boolean).join('\n')}
           secondary={
             <>
               <Box
@@ -112,6 +117,14 @@ export const ProxyItem = (props: Props) => {
                 {name}
                 {showType && now && ` - ${now}`}
               </Box>
+              {source && (
+                <Box
+                  component="span"
+                  sx={{ color: 'text.secondary', fontSize: 12, mr: 1 }}
+                >
+                  {source}
+                </Box>
+              )}
               {showType && <TypeBox>{type}</TypeBox>}
               {!unresolved && showType && details?.udp && (
                 <TypeBox>UDP</TypeBox>

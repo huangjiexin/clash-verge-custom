@@ -234,7 +234,11 @@ impl Config {
     }
 
     pub(crate) async fn generate_with_profiles(profiles: &IProfiles) -> Result<()> {
-        let (mut config, exists_keys, logs, dns_override) = enhance::enhance(profiles).await?;
+        let (config, mut exists_keys, logs, dns_override) = enhance::enhance(profiles).await?;
+        let (mut config, subscription_groups) = crate::extensions::subscription_groups::apply(config, profiles).await?;
+        if !subscription_groups.is_empty() {
+            exists_keys.extend(["proxies".into(), "proxy-groups".into()]);
+        }
 
         resolve_provider_path_conflicts(&mut config, &dirs::app_home_dir()?)?;
         sanitize_tunnels_proxy(&mut config);
@@ -249,6 +253,7 @@ impl Config {
                 dns_override: Some(dns_override),
                 exists_keys,
                 chain_logs: logs,
+                subscription_groups,
             }
         });
 

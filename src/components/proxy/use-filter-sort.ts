@@ -1,3 +1,5 @@
+import { applyGroupPolicy } from '@/features/subscription-groups/policy'
+import type { GroupPolicy } from '@/services/bindings'
 import delayManager from '@/services/delay'
 import { memberDetails } from '@/types/proxy-view'
 import { compareByDelay, DEFAULT_DELAY_TIMEOUT } from '@/utils/delay'
@@ -20,10 +22,17 @@ export function filterSort(
   sortType: ProxySortType,
   latencyTimeout?: number,
   searchState?: ProxySearchState,
+  policy?: GroupPolicy | null,
 ) {
   const fp = filterProxies(proxies, groupName, filterText, searchState)
-  const sp = sortProxies(fp, groupName, sortType, latencyTimeout)
-  return sp
+  if (policy)
+    return applyGroupPolicy(
+      fp,
+      policy,
+      ({ member }) => delayManager.getDelayFix(member, groupName),
+      latencyTimeout,
+    )
+  return sortProxies(fp, groupName, sortType, latencyTimeout)
 }
 
 const regex1 = /delay([=<>])(\d+|timeout|error)/i

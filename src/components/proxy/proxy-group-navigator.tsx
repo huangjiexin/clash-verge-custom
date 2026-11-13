@@ -1,6 +1,8 @@
 import { Box, Button, Tooltip } from '@mui/material'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 
+import { useProxyPresentation } from '@/features/subscription-groups/use-proxy-presentation'
+
 interface ProxyGroupNavigatorProps {
   proxyGroupNames: string[]
   onGroupLocation: (groupName: string) => void
@@ -25,6 +27,7 @@ export const ProxyGroupNavigator = ({
   enableHoverJump = true,
   hoverDelay = DEFAULT_HOVER_DELAY,
 }: ProxyGroupNavigatorProps) => {
+  const presentation = useProxyPresentation()
   const lastHoveredRef = useRef<string | null>(null)
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -81,9 +84,9 @@ export const ProxyGroupNavigator = ({
       .filter((name) => name && name.trim())
       .map((name) => ({
         name,
-        displayChar: getGroupDisplayChar(name),
+        displayChar: getGroupDisplayChar(presentation.summary(name)),
       }))
-  }, [proxyGroupNames])
+  }, [proxyGroupNames, presentation])
 
   if (processedGroups.length === 0) {
     return null
@@ -115,7 +118,12 @@ export const ProxyGroupNavigator = ({
       }}
     >
       {processedGroups.map(({ name, displayChar }) => (
-        <Tooltip key={name} title={name} placement="left" arrow>
+        <Tooltip
+          key={name}
+          title={presentation.summary(name)}
+          placement="left"
+          arrow
+        >
           <Button
             size="small"
             variant="text"

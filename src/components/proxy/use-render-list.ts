@@ -240,6 +240,8 @@ export const useRenderList = (
         '',
         0,
         latencyTimeout!,
+        undefined,
+        selected?.subscriptionGroup,
       )
       if (col > 1) {
         return groupOccurrences(occurrences, col).map((memberCol) => ({
@@ -301,6 +303,7 @@ export const useRenderList = (
             matchWholeWord: headState.filterMatchWholeWord,
             useRegularExpression: headState.filterUseRegularExpression,
           },
+          group.subscriptionGroup,
         )
         if (!useRule) {
           ret.push({ type: 1, key: `head-${group.name}`, group, headState })

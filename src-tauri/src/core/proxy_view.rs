@@ -23,6 +23,8 @@ pub struct ProxyViewBuilder;
 #[derive(Debug, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProxyViewV1 {
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub subscription_labels: BTreeMap<String, crate::extensions::subscription_groups::NodeLabel>,
     pub schema_version: u8,
     pub order_source: ProxyViewOrderSource,
     pub provider_state: ProxyViewProviderState,
@@ -60,6 +62,8 @@ pub struct ProxyCapabilities {
 #[derive(Debug, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProxyGroupView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscription_group: Option<crate::extensions::subscription_groups::GroupPolicy>,
     pub name: String,
     #[serde(rename = "type")]
     #[specta(type = String)]
@@ -276,6 +280,7 @@ impl ProxyViewBuilder {
         let standalone = build_standalone(&core_node_ids);
 
         ProxyViewV1 {
+            subscription_labels: BTreeMap::new(),
             schema_version: 1,
             order_source,
             provider_state,
@@ -427,6 +432,7 @@ fn build_group(name: String, proxy: Proxy, resolver: &MemberResolver<'_>) -> Pro
         .collect();
 
     ProxyGroupView {
+        subscription_group: None,
         name,
         proxy_type,
         now,

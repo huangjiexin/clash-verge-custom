@@ -4,6 +4,7 @@ import {
   type ProxyDelay,
 } from 'tauri-plugin-mihomo-api'
 
+import { newerGroupMeasurement } from '@/features/subscription-groups/history'
 import {
   memberDetails,
   providerNameOf,
@@ -250,6 +251,12 @@ class DelayManager {
     const details = memberDetails(member)
     const name = member.ref.name
     const update = this.getDelayUpdate(name, group)
+    const current = newerGroupMeasurement(
+      name,
+      details?.history?.at(-1),
+      update,
+    )
+    if (current !== undefined) return current
     if (update && (update.delay >= 0 || update.delay === -2)) {
       return update.delay
     }

@@ -501,3 +501,10 @@ export async function checkMediaUnlock(onComplete: Channel<UnlockItem>) {
 export async function checkMediaUnlockItem(name: string) {
   return commands.checkMediaUnlockItem(name)
 }
+
+export const getSubscriptionGroups = () => commands.getSubscriptionGroups()
+export const saveSubscriptionGroups = (
+  settings: import('./bindings').Settings,
+) => commands.saveSubscriptionGroups(settings)
+export const rescanSubscriptionGroup = (id: string) =>
+  commands.rescanSubscriptionGroup(id)

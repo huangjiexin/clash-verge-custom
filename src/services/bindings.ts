@@ -64,6 +64,12 @@ export const commands = {
   getRuntimeConfig: () =>
     __TAURI_INVOKE<{ [key in string]: JsonValue } | null>('get_runtime_config'),
   getProxyView: () => __TAURI_INVOKE<ProxyViewV1_Serialize>('get_proxy_view'),
+  getSubscriptionGroups: () =>
+    __TAURI_INVOKE<Overview>('get_subscription_groups'),
+  saveSubscriptionGroups: (settings: Settings) =>
+    __TAURI_INVOKE<null>('save_subscription_groups', { settings }),
+  rescanSubscriptionGroup: (id: string) =>
+    __TAURI_INVOKE<null>('rescan_subscription_group', { id }),
   getRuntimeYaml: () => __TAURI_INVOKE<string>('get_runtime_yaml'),
   getRuntimeLogs: () => __TAURI_INVOKE<RuntimeLogs>('get_runtime_logs'),
   getRuntimeProxyChainConfig: (proxyChainExitNode: string) =>
@@ -234,6 +240,12 @@ export type AutoProxy = {
   url: string
 }
 
+export type Check = {
+  url: string
+  'expected-status': number
+  validation?: Validation
+}
+
 export type ClashInfo = {
   /**  clash core port */
   mixed_port: number
@@ -311,6 +323,20 @@ export type FailedOperation =
   | 'systemProxyDisable'
   | 'systemProxyRestore'
   | 'systemProxyGuard'
+
+export type Group = {
+  id: string
+  name: string
+  enabled: boolean
+  sources: string[]
+  script: string
+}
+
+export type GroupPolicy = {
+  sort: string
+  automaticName: string | null
+  hideFailed: boolean
+}
 
 /**  Define the `profiles.yaml` schema */
 export type IProfiles = IProfiles_Serialize | IProfiles_Deserialize
@@ -579,6 +605,19 @@ export type NetworkInterfaceView = {
   mac_addr: string | null
 }
 
+export type NodeLabel = {
+  name: string
+  source: string
+}
+
+export type NodeResult = {
+  name: string
+  passed: boolean
+  delay: number | null
+  reason: string
+  checkedAt: string
+}
+
 export type NoticeStatus =
   | 'info'
   | 'import_sub_url::ok'
@@ -614,6 +653,21 @@ export type NoticeStatus =
   | 'config_core::change_error'
   | 'mixed_port::fallback'
   | 'mixed_port::fallback_error'
+
+export type Options = {
+  interval?: number
+  concurrency?: number
+  'interface-name'?: string
+  checks?: Check[]
+  automatic?: boolean
+  sort?: Sort
+}
+
+export type Overview = {
+  settings: Settings
+  reports: Report[]
+  config_path: string
+}
 
 export type PendingAction =
   | 'install'
@@ -806,6 +860,7 @@ export type ProxyGroupView =
   | ProxyGroupView_Deserialize
 
 export type ProxyGroupView_Deserialize = {
+  subscriptionGroup: GroupPolicy | null
   name: string
   type: string
   now: string | null
@@ -818,6 +873,7 @@ export type ProxyGroupView_Deserialize = {
 } & ProxyCapabilities
 
 export type ProxyGroupView_Serialize = {
+  subscriptionGroup?: GroupPolicy | null
   name: string
   type: string
   now?: string | null
@@ -913,6 +969,7 @@ export type ProxyViewProviderState = 'ready' | 'unavailable'
 export type ProxyViewV1 = ProxyViewV1_Serialize | ProxyViewV1_Deserialize
 
 export type ProxyViewV1_Deserialize = {
+  subscriptionLabels: { [key in string]: NodeLabel }
   schemaVersion: number
   orderSource: ProxyViewOrderSource
   providerState: ProxyViewProviderState
@@ -925,6 +982,7 @@ export type ProxyViewV1_Deserialize = {
 }
 
 export type ProxyViewV1_Serialize = {
+  subscriptionLabels?: { [key in string]: NodeLabel }
   schemaVersion: number
   orderSource: ProxyViewOrderSource
   providerState: ProxyViewProviderState
@@ -934,6 +992,18 @@ export type ProxyViewV1_Serialize = {
   records: { [key in string]: ProxyNodeView_Serialize }
   standalone: string[]
   providers: ProxyProviderView_Serialize[]
+}
+
+export type Report = {
+  groupId: string
+  running: boolean
+  completed: number
+  total: number
+  lastScan: string | null
+  error: string | null
+  nodes: NodeResult[]
+  options: Options
+  logs: string[]
 }
 
 export type RunStateView = {
@@ -974,11 +1044,17 @@ export type ServiceInstallOutcome =
   | { status: 'installed' }
   | { status: 'sidecar'; reason: string }
 
+export type Settings = {
+  groups: Group[]
+}
+
 /**  A removal has a revision too, so a delayed read cannot restore a resolved failure. */
 export type SidecarFailureSnapshot = {
   revision: number
   detail: string | null
 }
+
+export type Sort = 'delay' | 'name' | 'original'
 
 export type SystemInfo = {
   system_name: string
@@ -1002,6 +1078,8 @@ export type UnlockItem = {
   region: string | null
   check_time: string | null
 }
+
+export type Validation = 'status' | 'auth-json' | 'html'
 
 export type ValidationErrorKind =
   | 'fileMissing'

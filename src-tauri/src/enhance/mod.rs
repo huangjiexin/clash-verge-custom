@@ -3,6 +3,7 @@ mod chain;
 pub mod field;
 mod merge;
 mod script;
+pub(crate) use script::use_script as run_extension_script;
 pub mod seq;
 mod tun;
 

@@ -167,6 +167,7 @@ impl CoreManager {
                 dns_override: None,
                 exists_keys: HashSet::new(),
                 chain_logs: Default::default(),
+                subscription_groups: vec![],
             }
         });
 

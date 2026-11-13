@@ -19,7 +19,7 @@ type ScriptResult = (Mapping, Vec<String>, Vec<(String, String)>);
 type EvalOutcome = (Result<Mapping, std::string::String>, Vec<(String, String)>);
 
 /// Never fails: exceptions are logged and the input config is returned unchanged.
-pub(super) async fn use_script(script: String, config: Mapping, name: String) -> ScriptResult {
+pub(crate) async fn use_script(script: String, config: Mapping, name: String) -> ScriptResult {
     // The template is identity-plus-lowercasing; skip the Boa round-trip.
     if script == tmpl::ITEM_SCRIPT {
         return (use_lowercase_owned(config), vec![], vec![]);

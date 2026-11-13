@@ -173,6 +173,7 @@ pub async fn quit() {
 }
 
 pub async fn clean_async() -> CleanupResult {
+    crate::extensions::subscription_groups::finish_on_exit().await;
     let stop_error = Mutex::new(None);
     let mut result = run_interactive_cleanup_transition(
         || async {

@@ -3,6 +3,7 @@ import { alpha, Box, ListItemButton, styled, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
 
 import { BaseLoading } from '@/components/base'
+import { useProxyPresentation } from '@/features/subscription-groups/use-proxy-presentation'
 import { useProxyDelayState } from '@/hooks/use-proxy-delay-state'
 import delayManager from '@/services/delay'
 import {
@@ -24,9 +25,13 @@ export const ProxyItemMini = (props: Props) => {
   const { group, member, selected, showType = true, onClick } = props
   const details = memberDetails(member)
   const unresolved = member.kind === 'unresolved'
-  const name = member.ref.name
+  const presentation = useProxyPresentation()
+  const { name, source } = presentation.label(member.ref.name, group.name)
   const type = unresolved ? member.ref.reason : (details?.type ?? '')
-  const now = member.kind === 'group' ? member.group.now : undefined
+  const now =
+    member.kind === 'group' && member.group.now
+      ? presentation.summary(member.group.now, member.group.name)
+      : undefined
 
   const { t } = useTranslation()
 
@@ -81,7 +86,10 @@ export const ProxyItemMini = (props: Props) => {
         },
       ]}
     >
-      <Box title={`${name}\n${now ?? ''}`} sx={{ overflow: 'hidden' }}>
+      <Box
+        title={[name, source, now].filter(Boolean).join('\n')}
+        sx={{ overflow: 'hidden' }}
+      >
         <Typography
           variant="body2"
           component="div"
@@ -97,7 +105,7 @@ export const ProxyItemMini = (props: Props) => {
           {name}
         </Typography>
 
-        {showType && (
+        {(showType || source) && (
           <Box
             sx={{
               display: 'flex',
@@ -106,7 +114,18 @@ export const ProxyItemMini = (props: Props) => {
               marginTop: '4px',
             }}
           >
-            {now && (
+            {source && (
+              <Typography
+                component="span"
+                variant="caption"
+                color="text.secondary"
+                noWrap
+                sx={{ mr: 1, minWidth: 0 }}
+              >
+                {source}
+              </Typography>
+            )}
+            {showType && now && (
               <Typography
                 variant="body2"
                 component="div"
@@ -123,30 +142,32 @@ export const ProxyItemMini = (props: Props) => {
                 {now}
               </Typography>
             )}
-            <TypeBox color="text.secondary" component="span">
-              {type}
-            </TypeBox>
-            {!unresolved && details?.udp && (
+            {showType && (
+              <TypeBox color="text.secondary" component="span">
+                {type}
+              </TypeBox>
+            )}
+            {!unresolved && showType && details?.udp && (
               <TypeBox color="text.secondary" component="span">
                 UDP
               </TypeBox>
             )}
-            {!unresolved && details?.xudp && (
+            {!unresolved && showType && details?.xudp && (
               <TypeBox color="text.secondary" component="span">
                 XUDP
               </TypeBox>
             )}
-            {!unresolved && details?.tfo && (
+            {!unresolved && showType && details?.tfo && (
               <TypeBox color="text.secondary" component="span">
                 TFO
               </TypeBox>
             )}
-            {!unresolved && details?.mptcp && (
+            {!unresolved && showType && details?.mptcp && (
               <TypeBox color="text.secondary" component="span">
                 MPTCP
               </TypeBox>
             )}
-            {!unresolved && details?.smux && (
+            {!unresolved && showType && details?.smux && (
               <TypeBox color="text.secondary" component="span">
                 SMUX
               </TypeBox>

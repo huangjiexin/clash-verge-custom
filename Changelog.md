@@ -24,6 +24,9 @@
 <details>
 <summary><strong> 🐞 修复问题 </strong></summary>
 
+- Speed up subscription-group checks with configurable concurrency and a default of 16 nodes.
+- Replace service-specific subscription-group templates with general-purpose starters and onboarding guidance.
+- Fix subscription-group node labels to show readable names and sources instead of internal identifiers.
 - 修复全局模式缺少 `GLOBAL` 策略组，无法单独选择全局出口
 - 修复服务模式下，SSH 节点的 `private-key` 使用私钥文件时内核无法启动
 - 修复服务模式下，内核更新的 GEO 数据库不会同步回应用目录，导致使用新分类的规则无法通过校验
@@ -37,6 +40,8 @@
 
 <details>
 <summary><strong> ✨ 新增功能 </strong></summary>
+
+- Add independent subscription groups with per-group scripts, endpoint checks, failure filtering, and latency sorting.
 
 
 </details>

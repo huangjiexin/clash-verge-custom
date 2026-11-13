@@ -115,14 +115,17 @@ pub async fn get_proxy_view() -> CmdResult<ProxyViewV1> {
 
     let mihomo = Handle::mihomo();
     let (proxies, providers) = tokio::join!(mihomo.get_proxies(), mihomo.get_proxy_providers(),);
-    let proxies = proxies.stringify_err()?;
+    let mut proxies = proxies.stringify_err()?;
+    crate::extensions::subscription_groups::prepare_proxy_view(&latest_runtime.subscription_groups, &mut proxies);
 
-    Ok(ProxyViewBuilder::build(ProxyViewInput {
+    let mut view = ProxyViewBuilder::build(ProxyViewInput {
         runtime_group_order,
         group_scopes,
         proxies,
         providers: providers.ok(),
-    }))
+    });
+    crate::extensions::subscription_groups::decorate_proxy_view(&latest_runtime.subscription_groups, &mut view);
+    Ok(view)
 }
 
 #[tauri::command]
