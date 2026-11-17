@@ -188,7 +188,7 @@ export function GroupHelpDialog({
               </Box>
               <Typography variant="body2" color="text.secondary">
                 检测使用 GET 请求，不跟随重定向；单次请求超时为 10
-                秒。首个目标提供排序延迟。完整检测失败会移除节点，后续完整检测通过后可重新加入。
+                秒。首个目标提供排序延迟。更新期间继续使用上一版节点，完整检测得到非空结果后整体切换；本轮全部失败时保留旧节点并提示。
               </Typography>
             </>
           )}

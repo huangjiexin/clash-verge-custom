@@ -121,14 +121,20 @@ export function ResultsPanel({
           />
           <Chip
             size="small"
+            color="primary"
+            variant="outlined"
+            label={`在用 ${report?.activeNodes ?? 0}`}
+          />
+          <Chip
+            size="small"
             color="success"
             variant="outlined"
-            label={`保留 ${passed}`}
+            label={`检查通过 ${passed}`}
           />
           <Chip
             size="small"
             variant="outlined"
-            label={`排除 ${nodes.length - passed}`}
+            label={`检查未通过 ${nodes.length - passed}`}
           />
           {!!report?.options.checks?.length && (
             <Chip
@@ -157,7 +163,17 @@ export function ResultsPanel({
             severity="error"
             sx={{ mt: 1, maxHeight: 90, overflow: 'auto' }}
           >
-            {report.error}
+            {report.error === 'No nodes passed the latest scan'
+              ? '本轮没有节点通过检查。'
+              : report.error === 'No nodes selected by the script'
+                ? '脚本本轮没有选中节点。'
+                : report.error}
+          </Alert>
+        )}
+        {report?.usingPrevious && (
+          <Alert severity="info" sx={{ mt: 1 }}>
+            当前继续使用上一版 {report.activeNodes}{' '}
+            个节点，新的可用结果准备好后再切换。
           </Alert>
         )}
         <Collapse in={details}>
@@ -215,8 +231,8 @@ export function ResultsPanel({
             slotProps={{ select: { 'aria-label': '结果状态' } }}
           >
             <MenuItem value="all">全部结果</MenuItem>
-            <MenuItem value="passed">仅保留</MenuItem>
-            <MenuItem value="failed">仅排除</MenuItem>
+            <MenuItem value="passed">检查通过</MenuItem>
+            <MenuItem value="failed">检查未通过</MenuItem>
           </TextField>
         </Stack>
       </Box>
@@ -287,7 +303,7 @@ export function ResultsPanel({
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        {node.passed ? '保留' : '排除'}
+                        {node.passed ? '通过' : '未通过'}
                       </Box>
                     </TableCell>
                     <TableCell

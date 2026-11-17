@@ -6,7 +6,7 @@ use crate::{
     utils::{dirs, help},
 };
 use anyhow::{Context as _, Result, bail};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use futures::{StreamExt as _, stream};
 use parking_lot::Mutex;
 use reqwest::{Client, Proxy, StatusCode};
@@ -137,6 +137,27 @@ pub struct Report {
     pub nodes: Vec<NodeResult>,
     pub options: Options,
     pub logs: Vec<String>,
+    pub active_nodes: usize,
+    pub using_previous: bool,
+}
+
+impl Report {
+    fn begin(&mut self, request: &Request) {
+        self.running = true;
+        self.completed = 0;
+        self.total = request.candidates.len();
+        self.error = None;
+        self.options = request.options.clone();
+    }
+
+    fn record_node(&mut self, node: NodeResult) {
+        self.completed += 1;
+        if let Some(previous) = self.nodes.iter_mut().find(|previous| previous.name == node.name) {
+            *previous = node;
+        } else {
+            self.nodes.push(node);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -157,52 +178,85 @@ pub(crate) struct Request {
     hosts: Value,
     logs: Vec<String>,
     error: Option<String>,
+    serving: Snapshot,
 }
 
-#[derive(Clone)]
-struct Passed {
-    at: Instant,
-    checked_at: DateTime<Utc>,
-    delay: u64,
+#[derive(Clone, Default)]
+struct Snapshot {
+    request_id: u64,
+    options: Options,
+    candidates: Vec<Candidate>,
+}
+
+impl Snapshot {
+    fn prepare(request: &Request, passed: Option<&HashMap<u64, u64>>) -> Self {
+        let mut candidates: Vec<_> = request
+            .candidates
+            .iter()
+            .filter(|candidate| passed.is_none_or(|passed| passed.contains_key(&candidate.fingerprint)))
+            .cloned()
+            .collect();
+        match request.options.sort {
+            Sort::Delay => candidates.sort_by_key(|candidate| {
+                (
+                    passed
+                        .and_then(|passed| passed.get(&candidate.fingerprint))
+                        .copied()
+                        .unwrap_or(u64::MAX),
+                    candidate.name.clone(),
+                )
+            }),
+            Sort::Name => candidates.sort_by(|a, b| a.name.cmp(&b.name)),
+            Sort::Original => {}
+        }
+        Self {
+            request_id: request.id,
+            options: request.options.clone(),
+            candidates,
+        }
+    }
+
+    fn same_members(&self, other: &Self) -> bool {
+        self.request_id == other.request_id
+            && self
+                .candidates
+                .iter()
+                .map(|c| c.fingerprint)
+                .eq(other.candidates.iter().map(|c| c.fingerprint))
+    }
 }
 
 #[derive(Default)]
 struct State {
-    accepted: HashMap<u64, Passed>,
-    failed_at: HashMap<u64, DateTime<Utc>>,
+    ready: HashMap<String, Snapshot>,
     reports: HashMap<String, Report>,
 }
 
 impl State {
-    fn ordered(&self) -> Vec<u64> {
-        let mut nodes: Vec<_> = self.accepted.iter().collect();
-        nodes.sort_by_key(|(key, result)| (result.delay, **key));
-        nodes.into_iter().map(|(key, _)| *key).collect()
+    fn record(&mut self, request: &Request, passed: &HashMap<u64, u64>) -> bool {
+        let snapshot = Snapshot::prepare(request, Some(passed));
+        if snapshot.candidates.is_empty() {
+            self.ready.remove(&request.group.id);
+            return false;
+        }
+        let changed = !snapshot.same_members(&request.serving);
+        self.ready.insert(request.group.id.clone(), snapshot);
+        changed
     }
 
-    fn record(&mut self, candidates: &[Candidate], passed: &HashMap<u64, Passed>) -> bool {
-        let before = self.ordered();
-        let keys: HashSet<_> = candidates.iter().map(|c| c.fingerprint).collect();
-        self.accepted.retain(|key, _| !keys.contains(key));
-        for (key, result) in passed {
-            if keys.contains(key)
-                && self.failed_at.get(key).is_none_or(|failed| *failed < result.checked_at)
-                && result.at.elapsed() < Duration::from_secs(900)
-            {
-                self.accepted.insert(*key, result.clone());
-            }
+    fn serving(&self, request: &Request, previous: Option<&Request>) -> Snapshot {
+        if request.error.is_none() && request.options.checks.is_empty() && !request.candidates.is_empty() {
+            return Snapshot::prepare(request, None);
         }
-        before != self.ordered()
-    }
-
-    fn health_failure(&mut self, key: u64, at: DateTime<Utc>) -> bool {
-        let latest = self.failed_at.entry(key).or_insert(at);
-        *latest = (*latest).max(at);
-        if self.accepted.get(&key).is_some_and(|result| result.checked_at <= at) {
-            self.accepted.remove(&key);
-            return true;
-        }
-        false
+        self.ready
+            .get(&request.group.id)
+            .filter(|snapshot| snapshot.request_id == request.id)
+            .cloned()
+            .or_else(|| previous.map(|previous| previous.serving.clone()))
+            .unwrap_or_else(|| Snapshot {
+                options: request.options.clone(),
+                ..Snapshot::default()
+            })
     }
 }
 
@@ -301,6 +355,7 @@ pub(super) async fn prepare(group: &Group, profiles: &IProfiles, config: &Mappin
         hosts,
         logs: vec![],
         error: None,
+        serving: Snapshot::default(),
     };
     Ok(Request { logs, ..request })
 }
@@ -380,33 +435,19 @@ pub(super) fn failed_request(group: &Group, config: &Mapping, error: String) -> 
         hosts: config.get("hosts").cloned().unwrap_or_default(),
         logs: vec![],
         error: Some(error),
+        serving: Snapshot::default(),
     }
 }
 
-pub(super) fn append(config: &mut Mapping, request: &Request) -> Result<()> {
-    let state = STATE.lock();
-    let mut eligible: Vec<_> = request
-        .candidates
-        .iter()
-        .filter(|c| {
-            request.options.checks.is_empty()
-                || state
-                    .accepted
-                    .get(&c.fingerprint)
-                    .is_some_and(|r| r.at.elapsed() < Duration::from_secs(900))
-        })
-        .collect();
-    match request.options.sort {
-        Sort::Delay => eligible.sort_by_key(|c| {
-            (
-                state.accepted.get(&c.fingerprint).map_or(u64::MAX, |r| r.delay),
-                c.name.clone(),
-            )
-        }),
-        Sort::Name => eligible.sort_by(|a, b| a.name.cmp(&b.name)),
-        Sort::Original => {}
-    }
-    drop(state);
+pub(super) fn append(config: &mut Mapping, request: &mut Request, previous: Option<&Request>) -> Result<()> {
+    // The committed runtime owns the serving set; completed scans only stage its replacement.
+    request.serving = STATE.lock().serving(request, previous);
+    append_serving(config, request)
+}
+
+fn append_serving(config: &mut Mapping, request: &Request) -> Result<()> {
+    let eligible = &request.serving.candidates;
+    let options = request.serving_options();
     let mut nodes = config
         .get("proxies")
         .and_then(Value::as_sequence)
@@ -416,7 +457,7 @@ pub(super) fn append(config: &mut Mapping, request: &Request) -> Result<()> {
         .iter()
         .filter_map(|n| n.get("name").and_then(Value::as_str).map(str::to_owned))
         .collect();
-    for c in &eligible {
+    for c in eligible {
         if known.contains(&c.name) {
             bail!("screening node name conflicts with an existing proxy");
         }
@@ -431,8 +472,8 @@ pub(super) fn append(config: &mut Mapping, request: &Request) -> Result<()> {
     }
     let mut choices = Vec::new();
     let mut generated = Vec::new();
-    if request.options.automatic {
-        let check = &request.options.checks[0];
+    if options.automatic {
+        let check = &options.checks[0];
         generated.push(json!({"name": automatic_name, "type": "url-test", "proxies": automatic,
             "url": check.url, "expected-status": check.expected_status, "interval": 60,
             "timeout": 10000, "lazy": false, "tolerance": 100}));
@@ -443,9 +484,9 @@ pub(super) fn append(config: &mut Mapping, request: &Request) -> Result<()> {
         choices.push("REJECT".into());
     }
     let mut parent = json!({"name": request.group.name, "type": "select", "proxies": choices});
-    if let Some(check) = request.options.checks.first() {
+    if let Some(check) = options.checks.first() {
         parent["url"] = json!(check.url);
-        if !request.options.automatic {
+        if !options.automatic {
             parent["expected-status"] = json!(check.expected_status);
             parent["interval"] = json!(60);
             parent["lazy"] = json!(false);
@@ -473,7 +514,14 @@ pub(super) fn append(config: &mut Mapping, request: &Request) -> Result<()> {
 
 impl Request {
     pub(super) fn node_labels(&self) -> impl Iterator<Item = (String, super::NodeLabel)> + '_ {
-        self.candidates.iter().map(|c| (c.name.clone(), c.label.clone()))
+        self.serving
+            .candidates
+            .iter()
+            .map(|c| (c.name.clone(), c.label.clone()))
+    }
+
+    pub(super) fn serving_options(&self) -> &Options {
+        &self.serving.options
     }
 
     pub(super) fn automatic_name(&self) -> String {
@@ -505,18 +553,15 @@ pub(super) fn reports(requests: &[Request]) -> Vec<Report> {
             }
             report.logs = request.logs.clone();
             report.total = request.candidates.len();
-            for node in &mut report.nodes {
-                if !request.options.checks.is_empty()
-                    && let Some(candidate) = request.candidates.iter().find(|c| c.name == node.name)
-                    && !state.accepted.contains_key(&candidate.fingerprint)
-                    && !report.running
-                {
-                    node.passed = false;
-                    if node.reason == "Passed all checks" {
-                        node.reason = "Not currently admitted; awaiting a fresh successful scan".into();
-                    }
-                }
-            }
+            report.active_nodes = request.serving.candidates.len();
+            report.using_previous = report.active_nodes > 0
+                && (report.running
+                    || report.error.is_some()
+                    || request.serving.request_id != request.id
+                    || state
+                        .ready
+                        .get(&request.group.id)
+                        .is_some_and(|ready| !ready.same_members(&request.serving)));
             report
         })
         .collect()
@@ -538,14 +583,10 @@ pub(crate) fn start() {
                 break;
             }
             let requests = current_requests().await;
-            let all_keys: HashSet<_> = requests
-                .iter()
-                .flat_map(|r| r.candidates.iter().map(|c| c.fingerprint))
-                .collect();
+            last.retain(|id, _| requests.iter().any(|r| &r.group.id == id));
             {
                 let mut state = STATE.lock();
-                state.accepted.retain(|k, _| all_keys.contains(k));
-                state.failed_at.retain(|k, _| all_keys.contains(k));
+                state.ready.retain(|id, _| requests.iter().any(|r| &r.group.id == id));
                 state.reports.retain(|id, _| requests.iter().any(|r| &r.group.id == id));
             }
             for request in requests {
@@ -571,12 +612,8 @@ pub(crate) fn start() {
                                 let mut state = STATE.lock();
                                 let report = state.reports.entry(request.group.id.clone()).or_default();
                                 report.error = Some(error.to_string());
-                                // A missing or unreadable source must not leave stale nodes eligible.
-                                for c in &request.candidates {
-                                    state.accepted.remove(&c.fingerprint);
-                                }
+                                state.ready.remove(&request.group.id);
                                 drop(state);
-                                pending_reload = true;
                                 last.insert(request.group.id.clone(), (request.id, Instant::now()));
                             }
                             reload_if_needed(&mut pending_reload).await;
@@ -587,18 +624,24 @@ pub(crate) fn start() {
                     if request.options.checks.is_empty() {
                         let mut state = STATE.lock();
                         let report = state.reports.entry(request.group.id.clone()).or_default();
-                        report.nodes = request
-                            .candidates
-                            .iter()
-                            .map(|c| NodeResult {
-                                name: c.name.clone(),
-                                passed: true,
-                                delay: None,
-                                reason: "Selected by script; connectivity not tested".into(),
-                                checked_at: Utc::now().to_rfc3339(),
-                            })
-                            .collect();
+                        if !request.candidates.is_empty() {
+                            report.nodes = request
+                                .candidates
+                                .iter()
+                                .map(|c| NodeResult {
+                                    name: c.name.clone(),
+                                    passed: true,
+                                    delay: None,
+                                    reason: "Selected by script; connectivity not tested".into(),
+                                    checked_at: Utc::now().to_rfc3339(),
+                                })
+                                .collect();
+                        }
                         report.last_scan = Some(Utc::now().to_rfc3339());
+                        report.error = request
+                            .candidates
+                            .is_empty()
+                            .then(|| "No nodes selected by the script".into());
                         drop(state);
                         last.insert(request.group.id.clone(), (request.id, Instant::now()));
                         continue;
@@ -606,26 +649,10 @@ pub(crate) fn start() {
                     {
                         let mut state = STATE.lock();
                         let report = state.reports.entry(request.group.id.clone()).or_default();
-                        report.running = true;
-                        report.completed = 0;
-                        report.total = request.candidates.len();
-                        report.nodes.clear();
-                        report.error = None;
-                        report.options = request.options.clone();
+                        report.begin(&request);
                         drop(state);
                     }
-                    let scan = scan(&request);
-                    tokio::pin!(scan);
-                    let mut health_tick = tokio::time::interval(Duration::from_secs(5));
-                    let result = loop {
-                        tokio::select! {
-                            result = &mut scan => break result,
-                            _ = health_tick.tick() => {
-                                pending_reload |= sync_health().await;
-                                reload_if_needed(&mut pending_reload).await;
-                            }
-                        }
-                    };
+                    let result = scan(&request).await;
                     last.insert(request.group.id.clone(), (request.id, Instant::now()));
                     let current = is_current(&request).await;
                     let mut state = STATE.lock();
@@ -637,65 +664,24 @@ pub(crate) fn start() {
                     }
                     match result {
                         Ok(passed) => {
-                            pending_reload |= state.record(&request.candidates, &passed);
+                            report
+                                .nodes
+                                .retain(|node| request.candidates.iter().any(|c| c.name == node.name));
+                            if passed.is_empty() {
+                                report.error = Some("No nodes passed the latest scan".into());
+                            }
+                            pending_reload |= state.record(&request, &passed);
                         }
                         Err(error) => {
                             report.error = Some(error.to_string());
-                            let before = state.accepted.len();
-                            state
-                                .accepted
-                                .retain(|_, result| result.at.elapsed() < Duration::from_secs(900));
-                            pending_reload |= state.accepted.len() != before;
+                            state.ready.remove(&request.group.id);
                         }
                     }
                 }
-                pending_reload |= sync_health().await;
                 reload_if_needed(&mut pending_reload).await;
             }
         }
     });
-}
-
-async fn sync_health() -> bool {
-    let Ok(proxies) = Handle::mihomo().get_proxies().await else {
-        return false;
-    };
-    let requests = current_requests().await;
-    let mut state = STATE.lock();
-    let mut changed = false;
-    for request in requests {
-        let Some(check) = request.options.checks.first() else {
-            continue;
-        };
-        for candidate in &request.candidates {
-            let Some(health) = proxies
-                .proxies
-                .get(&candidate.name)
-                .and_then(|p| p.extra.get(&check.url))
-            else {
-                continue;
-            };
-            let Some(sample) = health.history.last() else {
-                continue;
-            };
-            if (!health.alive || sample.delay == 0)
-                && let Ok(at) = DateTime::parse_from_rfc3339(&sample.time)
-            {
-                let removed = state.health_failure(candidate.fingerprint, at.with_timezone(&Utc));
-                changed |= removed;
-                if removed
-                    && let Some(report) = state.reports.get_mut(&request.group.id)
-                    && let Some(node) = report.nodes.iter_mut().find(|n| n.name == candidate.name)
-                {
-                    node.passed = false;
-                    node.reason = "Latest health check failed".into();
-                    node.delay = None;
-                    node.checked_at = sample.time.clone();
-                }
-            }
-        }
-    }
-    changed
 }
 
 async fn reload_if_needed(pending: &mut bool) {
@@ -730,7 +716,7 @@ async fn collect_checks<F: std::future::Future>(
     stream::iter(checks).buffer_unordered(concurrency).collect().await
 }
 
-async fn scan(request: &Request) -> Result<HashMap<u64, Passed>> {
+async fn scan(request: &Request) -> Result<HashMap<u64, u64>> {
     let _scan = SCAN_LOCK.lock().await;
     if Handle::global().is_exiting() {
         bail!("application is exiting");
@@ -812,14 +798,11 @@ async fn scan(request: &Request) -> Result<HashMap<u64, Passed>> {
                 .into_iter()
                 .zip(ports)
                 .map(|(candidate, port)| async move {
-                    let started = Instant::now();
-                    let checked_at = Utc::now();
                     let result = check_node(port, &request.options.checks).await;
                     let delay = result.as_ref().ok().copied();
                     let mut state = STATE.lock();
                     if let Some(report) = state.reports.get_mut(&request.group.id) {
-                        report.completed += 1;
-                        report.nodes.push(NodeResult {
+                        report.record_node(NodeResult {
                             name: candidate.name.clone(),
                             passed: result.is_ok(),
                             delay,
@@ -830,14 +813,7 @@ async fn scan(request: &Request) -> Result<HashMap<u64, Passed>> {
                         });
                     }
                     drop(state);
-                    (
-                        candidate.fingerprint,
-                        delay.map(|delay| Passed {
-                            at: started,
-                            checked_at,
-                            delay,
-                        }),
-                    )
+                    (candidate.fingerprint, delay)
                 }),
             request.options.concurrency,
         )
@@ -1022,42 +998,154 @@ mod tests {
         }
     }
 
-    #[test]
-    fn membership_requires_success_and_removes_failed_or_replaced_nodes() {
-        let candidate = |id| Candidate {
-            label: super::super::NodeLabel::default(),
-            name: format!("node-{id}"),
-            proxy: Value::Null,
-            fingerprint: id,
+    fn checked_request(id: u64, group_id: &str, node_ids: &[u64]) -> Request {
+        let group = Group {
+            id: group_id.into(),
+            name: format!("Group {group_id}"),
+            enabled: true,
+            sources: vec![],
+            script: String::new(),
         };
-        let nodes = vec![candidate(1), candidate(2)];
-        let mut state = State::default();
-        let at = Utc::now();
-        let pass = |checked_at, delay| Passed {
-            at: Instant::now(),
-            checked_at,
-            delay,
+        let mut request = failed_request(&group, &Mapping::new(), String::new());
+        request.id = id;
+        request.error = None;
+        request.options = Options {
+            interval: 3600,
+            automatic: true,
+            checks: vec![Check {
+                url: format!("https://check-{id}.example/health"),
+                expected_status: 204,
+                validation: Validation::Status,
+            }],
+            ..Options::default()
         };
-        let passed = HashMap::from([(1, pass(at, 100))]);
-        assert!(state.record(&nodes, &passed));
-        assert!(!state.accepted.contains_key(&2));
-        assert!(state.record(&nodes, &HashMap::new()));
-        assert!(state.accepted.is_empty());
-        assert!(state.record(&nodes, &passed));
-        assert!(!state.record(&[candidate(3)], &HashMap::new()));
-        assert!(state.accepted.contains_key(&1)); // Another group's update must not evict this node.
+        request.candidates = node_ids
+            .iter()
+            .map(|id| Candidate {
+                label: super::super::NodeLabel {
+                    name: format!("Node {id}"),
+                    source: "Source".into(),
+                },
+                name: format!("node-{id}"),
+                proxy: serde_yaml_ng::to_value(json!({
+                    "name": format!("node-{id}"), "type": "ss", "server": format!("node-{id}.example"),
+                    "port": 443, "cipher": "aes-128-gcm", "password": "test"
+                }))
+                .unwrap(),
+                fingerprint: *id,
+            })
+            .collect();
+        request
+    }
 
-        assert!(state.record(&nodes, &HashMap::from([(1, pass(at, 200)), (2, pass(at, 50))])));
-        assert_eq!(state.ordered(), vec![2, 1]);
-        let failure = at + chrono::Duration::seconds(1);
-        assert!(state.health_failure(1, failure));
-        // An in-flight scan cannot resurrect a node that failed after its probe began.
-        state.record(&nodes, &passed);
-        assert!(!state.accepted.contains_key(&1));
-        let recovery = failure + chrono::Duration::seconds(1);
-        assert!(state.record(&nodes, &HashMap::from([(1, pass(recovery, 80))])));
-        assert!(!state.health_failure(1, failure));
-        assert!(state.accepted.contains_key(&1));
+    #[test]
+    fn refresh_keeps_the_committed_set_until_a_complete_replacement_is_ready() {
+        let mut state = State::default();
+        let mut committed = checked_request(1, "one", &[1, 2]);
+        assert!(state.record(&committed, &HashMap::from([(1, 100), (2, 200)])));
+        committed.serving = state.serving(&committed, None);
+        let mut before = Mapping::new();
+        append_serving(&mut before, &committed).unwrap();
+
+        let mut draft = checked_request(2, "one", &[3, 4]);
+        draft.serving = state.serving(&draft, Some(&committed));
+        let mut pending = Mapping::new();
+        append_serving(&mut pending, &draft).unwrap();
+        assert_eq!(pending, before);
+        assert_eq!(
+            draft.node_labels().map(|(name, _)| name).collect::<Vec<_>>(),
+            vec!["node-1", "node-2"]
+        );
+        assert_eq!(draft.serving_options().checks[0].url, committed.options.checks[0].url);
+
+        assert!(state.record(&draft, &HashMap::from([(4, 50), (3, 100)])));
+        let mut still_serving = Mapping::new();
+        append_serving(&mut still_serving, &committed).unwrap();
+        assert_eq!(still_serving, before);
+
+        draft.serving = state.serving(&draft, Some(&committed));
+        let mut after = Mapping::new();
+        append_serving(&mut after, &draft).unwrap();
+        assert_eq!(after.get("proxies").unwrap().as_sequence().unwrap().len(), 2);
+        assert_eq!(
+            draft.node_labels().map(|(name, _)| name).collect::<Vec<_>>(),
+            vec!["node-4", "node-3"]
+        );
+        assert_eq!(draft.serving_options().checks[0].url, draft.options.checks[0].url);
+
+        // Rejecting a draft leaves the runtime's previous proxy definitions intact.
+        drop(draft);
+        let mut rejected = Mapping::new();
+        append_serving(&mut rejected, &committed).unwrap();
+        assert_eq!(rejected, before);
+
+        let failed_refresh = checked_request(2, "one", &[3, 4]);
+        assert!(!state.record(&failed_refresh, &HashMap::new()));
+        assert!(
+            state
+                .serving(&failed_refresh, Some(&committed))
+                .same_members(&committed.serving)
+        );
+    }
+
+    #[test]
+    fn empty_and_broken_updates_keep_each_groups_previous_snapshot() {
+        let mut state = State::default();
+        let mut committed = checked_request(1, "one", &[1, 2]);
+        state.record(&committed, &HashMap::from([(1, 100)]));
+        committed.serving = state.serving(&committed, None);
+        for request in [
+            checked_request(1, "one", &[1, 2]),
+            checked_request(2, "one", &[3]),
+            checked_request(3, "one", &[]),
+            failed_request(&committed.group, &Mapping::new(), "Source unavailable".into()),
+        ] {
+            assert!(!state.record(&request, &HashMap::new()));
+            let snapshot = state.serving(&request, Some(&committed));
+            assert!(snapshot.same_members(&committed.serving));
+            assert_eq!(snapshot.candidates[0].proxy, committed.serving.candidates[0].proxy);
+        }
+        let unrelated = checked_request(1, "two", &[1]);
+        assert!(state.serving(&unrelated, None).candidates.is_empty());
+        assert!(
+            state
+                .serving(&committed, Some(&committed))
+                .same_members(&committed.serving)
+        );
+    }
+
+    #[test]
+    fn scan_progress_preserves_previous_results_and_replaces_matching_rows() {
+        let request = checked_request(1, "one", &[1, 2]);
+        let mut report = Report {
+            last_scan: Some("previous completion".into()),
+            nodes: vec![NodeResult {
+                name: "node-1".into(),
+                passed: true,
+                ..NodeResult::default()
+            }],
+            ..Report::default()
+        };
+        report.begin(&request);
+        assert!(report.running);
+        assert_eq!(report.completed, 0);
+        assert_eq!(report.nodes.len(), 1);
+        assert_eq!(report.last_scan.as_deref(), Some("previous completion"));
+        report.record_node(NodeResult {
+            name: "node-1".into(),
+            passed: false,
+            ..NodeResult::default()
+        });
+        report.record_node(NodeResult {
+            name: "node-2".into(),
+            passed: true,
+            ..NodeResult::default()
+        });
+        assert_eq!(report.completed, 2);
+        assert_eq!(report.nodes.len(), 2);
+        assert!(!report.nodes[0].passed);
+        report.begin(&request);
+        assert_eq!(report.nodes.len(), 2);
     }
 
     #[tokio::test]
@@ -1113,8 +1201,8 @@ mod tests {
         let mut config = Mapping::new();
         config.insert("rules".into(), rules.clone());
         for (id, name) in [("one", "Codex"), ("two", "Claude"), ("three", "Company")] {
-            let request = failed_request(&group(id, name), &config, "Missing source".into());
-            append(&mut config, &request).unwrap();
+            let mut request = failed_request(&group(id, name), &config, "Missing source".into());
+            append(&mut config, &mut request, None).unwrap();
         }
         assert_eq!(config.get("rules"), Some(&rules));
         let groups = config.get("proxy-groups").unwrap().as_sequence().unwrap();

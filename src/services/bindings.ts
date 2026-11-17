@@ -1004,6 +1004,8 @@ export type Report = {
   nodes: NodeResult[]
   options: Options
   logs: string[]
+  activeNodes: number
+  usingPrevious: boolean
 }
 
 export type RunStateView = {

@@ -70,21 +70,29 @@ share the scan worker and queue, so their limits do not multiply.
 The process and private configuration are removed after the scan or cancellation.
 No user-managed service, system proxy change, or rule change is needed.
 
-Each group has independent fingerprints, timestamps and failure state. A successful
-full check admits a node, a failed full check removes it, and only a later full
-success readmits it. The first check supplies the health-check URL and initial
-latency. Native health checks run every 60 seconds; the worker observes failures
-within 2–5 seconds, even during scans. UI Error/Timeout measurements are hidden
-when the measurement batch settles. Unknown measurements are not failures.
-Automatic selection is pinned first, and `REJECT` remains visible if none qualify.
+Each group keeps its serving snapshot separate from the candidates being checked.
+Subscription updates, changed credentials, slow scans and unreadable sources retain
+the exact previously committed node definitions and health-check settings. A full
+scan stages a replacement only when at least one candidate passes all checks; the
+normal configuration transaction publishes the replacement after validation and
+application succeed. An empty or failed scan keeps the previous snapshot and reports
+an error. Serving snapshots do not expire while waiting for a replacement.
+Native health checks still run every 60 seconds for automatic selection, but an
+individual failed measurement does not delete a serving node or hide it from the
+proxy list. A later successful full scan removes nodes that failed that scan.
+Automatic selection stays first. A new group without a previous successful snapshot
+uses `REJECT` until its first usable result. Explicitly disabling or deleting a group
+removes it immediately. Snapshots are in memory and do not survive an app restart.
+The results panel retains previous rows during scans, updates checked nodes in place,
+and distinguishes scan results from the number of nodes currently serving traffic.
 The full scan interval (60–3600 seconds) starts after the preceding scan finishes.
 Source files and scripts are re-evaluated at the next scan and during normal config
-regeneration. Changed credentials or check conditions invalidate old passes.
+regeneration. Updated node definitions are checked before replacing serving nodes.
 
 Scripts cannot change the active profile's routing rules through this interface.
 Users route traffic to the named groups using their existing rule editor.
-Broken scripts or missing sources produce an empty rejecting group and a visible
-error rather than borrowing another group's nodes. This version supports inline
+Broken scripts or missing sources report a visible error and retain that group's
+previous snapshot when available. A group never borrows another group's nodes. This version supports inline
 `proxies`; sources using `proxy-providers` report an explicit unsupported-source
 error. Traffic/expiry placeholders and dependent `dialer-proxy` nodes are excluded.
 

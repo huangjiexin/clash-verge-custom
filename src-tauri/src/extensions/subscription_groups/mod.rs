@@ -67,13 +67,15 @@ pub(crate) async fn apply(mut config: Mapping, profiles: &IProfiles) -> Result<(
     let settings = load().await?.unwrap_or_else(|| Settings {
         groups: legacy.into_iter().collect(),
     });
+    let previous = Config::runtime().await.data_arc();
     let mut requests = Vec::new();
     for group in settings.groups.iter().filter(|g| g.enabled) {
-        let request = match worker::prepare(group, profiles, &config).await {
+        let mut request = match worker::prepare(group, profiles, &config).await {
             Ok(request) => request,
             Err(error) => worker::failed_request(group, &config, error.to_string()),
         };
-        worker::append(&mut config, &request)?;
+        let serving = previous.subscription_groups.iter().find(|r| r.group.id == group.id);
+        worker::append(&mut config, &mut request, serving)?;
         requests.push(request);
     }
     Ok((config, requests))
@@ -165,7 +167,7 @@ pub async fn rescan_subscription_group(id: String) -> CmdResult<()> {
 
 pub(crate) fn prepare_proxy_view(requests: &[Request], proxies: &mut Proxies) {
     for request in requests {
-        let Some(check) = request.options.checks.first() else {
+        let Some(check) = request.serving_options().checks.first() else {
             continue;
         };
         let prefix = format!("SG/{}/", request.group.id);
@@ -183,17 +185,18 @@ pub(crate) fn decorate_proxy_view(requests: &[Request], view: &mut crate::core::
     for request in requests {
         view.subscription_labels.extend(request.node_labels());
         let automatic = request.automatic_name();
+        let options = request.serving_options();
         for group in &mut view.groups {
-            if group.name == request.group.name || (request.options.automatic && group.name == automatic) {
+            if group.name == request.group.name || (options.automatic && group.name == automatic) {
                 group.subscription_group = Some(GroupPolicy {
-                    sort: match request.options.sort {
+                    sort: match options.sort {
                         worker::Sort::Delay => "delay",
                         worker::Sort::Name => "name",
                         worker::Sort::Original => "original",
                     }
                     .into(),
-                    automatic_name: request.options.automatic.then(|| automatic.clone()),
-                    hide_failed: !request.options.checks.is_empty(),
+                    automatic_name: options.automatic.then(|| automatic.clone()),
+                    hide_failed: false,
                 });
             }
         }

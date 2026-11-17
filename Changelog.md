@@ -24,6 +24,7 @@
 <details>
 <summary><strong> 🐞 修复问题 </strong></summary>
 
+- Keep subscription-group nodes available during updates and failed checks until a usable replacement is ready.
 - Speed up subscription-group checks with configurable concurrency and a default of 16 nodes.
 - Replace service-specific subscription-group templates with general-purpose starters and onboarding guidance.
 - Fix subscription-group node labels to show readable names and sources instead of internal identifiers.
